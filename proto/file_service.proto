@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package file_service;
+
+option go_package = "./proto";
+
+service FileService {
+  rpc UploadFile(stream UploadFileRequest) returns (UploadFileResponse);
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  rpc DownloadFile(DownloadFileRequest) returns (stream DownloadFileResponse);
+}
+
+message UploadFileRequest {
+  bytes chunk = 1;
+  string filename = 2;
+}
+
+message UploadFileResponse {
+  string message = 1;
+  uint32 size = 2;
+}
+
+message ListFilesRequest {}
+
+message ListFilesResponse {
+  repeated FileInfo files = 1;
+}
+
+message FileInfo {
+  string filename = 1;
+  string created_at = 2;
+  string updated_at = 3;
+}
+
+message DownloadFileRequest {
+  string filename = 1;
+}
+
+message DownloadFileResponse {
+  bytes chunk = 1;
+}
