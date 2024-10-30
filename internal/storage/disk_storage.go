@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -57,8 +56,5 @@ func (s *DiskStorage) List() ([]domain.File, error) {
 func (s *DiskStorage) Get(filename string) (io.ReadCloser, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	filePath := filepath.Join(s.baseDir, filename)
-	fmt.Println(filePath)
 	return os.Open(filename)
 }

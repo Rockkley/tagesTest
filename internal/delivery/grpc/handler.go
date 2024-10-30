@@ -26,7 +26,9 @@ type FileServiceHandler struct {
 	downloadLimiter  *limiter.Limiter
 	listLimiter      *limiter.Limiter
 	storageDir       string
+	filename         string
 	uploadBufferSize int
+	errChan          chan error
 }
 
 func NewFileServiceHandler(service *service.FileService, storageDir string) *FileServiceHandler {
@@ -52,44 +54,24 @@ func (h *FileServiceHandler) UploadFile(stream pb.FileService_UploadFileServer) 
 	}
 	defer h.uploadLimiter.Release()
 
-	var filename string
-	var totalSize int64
-	dataChan := make(chan []byte, h.uploadBufferSize)
-	errChan := make(chan error, 1)
-
-	go func() {
-		defer close(dataChan)
-		for {
-			select {
-			case <-ctx.Done():
-				log.Println("Context done, stopping receive loop")
-				return
-			default:
-				req, err := stream.Recv()
-
-				if err == io.EOF {
-					log.Println("received EOF in goroutine")
-					return
-				}
-				if err != nil {
-					log.Printf("error receiving chunk in goroutine: %v", err)
-					errChan <- err
-					return
-				}
-				if filename == "" {
-					filename = filepath.Base(req.Filename)
-					log.Printf("Received filename: %s", filename)
-				}
-				dataChan <- req.Chunk
-			}
-		}
-	}()
-
-	filePath := filepath.Join(h.storageDir, filename)
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(h.storageDir), 0755); err != nil {
 		log.Printf("failed to create directory: %v", err)
 		return status.Errorf(codes.Internal, "failed to create directory: %v", err)
 	}
+	var (
+		filename  string
+		totalSize int64
+	)
+
+	dataChan := make(chan []byte, h.uploadBufferSize)
+	errChan := make(chan error, 1)
+
+	req, err := stream.Recv()
+	if err == io.EOF {
+		log.Println("received EOF in goroutine")
+	}
+	h.filename = filepath.Base(req.GetImagePath())
+	filePath := fmt.Sprintf("%s/%s", h.storageDir, h.filename)
 
 	// check if file already exists
 	if _, err := os.Stat(filePath); err == nil {
@@ -103,26 +85,59 @@ func (h *FileServiceHandler) UploadFile(stream pb.FileService_UploadFileServer) 
 	}
 	defer file.Close()
 
+	go h.receivingLoop(ctx, dataChan, stream)
 	for {
 		select {
 		case chunk, ok := <-dataChan:
 			if !ok {
 				if totalSize == 0 {
-					log.Println("no file data received")
-					return status.Errorf(codes.InvalidArgument, "no file data received")
+					log.Println("No file data received")
+					return status.Error(codes.InvalidArgument, "No file data received")
 				}
 				log.Printf("File %s uploaded successfully, size: %d bytes", filename, totalSize)
-				return stream.SendAndClose(&pb.UploadFileResponse{Message: "File uploaded successfully"})
+				return stream.SendAndClose(&pb.UploadFileResponse{
+					Message: fmt.Sprintf("File uploaded successfully. Size: %d bytes", totalSize),
+				})
 			}
-			_, err := file.Write(chunk)
+			n, err := file.Write(chunk)
 			if err != nil {
-				log.Printf("failed to write chunk: %v", err)
-				return status.Errorf(codes.Internal, "failed to write chunk: %v", err)
+				log.Printf("Failed to write chunk: %v", err)
+				return status.Errorf(codes.Internal, "Failed to write chunk: %v", err)
 			}
-			totalSize += int64(len(chunk))
+			totalSize += int64(n)
 			log.Printf("Received chunk, total data size: %d bytes", totalSize)
 		case err := <-errChan:
-			return status.Errorf(codes.Internal, "error receiving file: %v", err)
+			return status.Errorf(codes.Internal, "Error receiving file: %v", err)
+		}
+	}
+}
+
+func (h *FileServiceHandler) receivingLoop(
+	ctx context.Context, dataChan chan []byte, stream pb.FileService_UploadFileServer,
+) {
+
+	defer close(dataChan)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Context done, stopping receive loop")
+			return
+		default:
+			req, err := stream.Recv()
+			if err == io.EOF {
+				log.Println("received EOF in goroutine")
+				return
+			}
+			if err != nil {
+				log.Printf("error receiving chunk in goroutine: %v", err)
+				h.errChan <- err
+				return
+			}
+			chunk := req.GetChunk()
+			size := len(chunk)
+			log.Printf("received a chunk with size: %d", size)
+			dataChan <- chunk
 		}
 	}
 }
@@ -155,7 +170,9 @@ func (h *FileServiceHandler) DownloadFile(req *pb.DownloadFileRequest, stream pb
 		return status.Errorf(codes.ResourceExhausted, "download limit reached")
 	}
 	defer h.downloadLimiter.Release()
-	fmt.Println(h.storageDir, req.Filename)
+	if !isImage(req.Filename) {
+		return status.Errorf(codes.InvalidArgument, "not an image")
+	}
 	filePath := filepath.Join(h.storageDir, req.Filename)
 	file, err := h.service.DownloadFile(filePath)
 	if err != nil {

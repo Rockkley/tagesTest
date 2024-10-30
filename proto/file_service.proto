@@ -11,10 +11,11 @@ service FileService {
 }
 
 message UploadFileRequest {
-  bytes chunk = 1;
-  string filename = 2;
+  oneof data {
+    string image_path = 1;
+    bytes chunk = 2;
+  }
 }
-
 message UploadFileResponse {
   string message = 1;
   uint32 size = 2;
