@@ -26,8 +26,8 @@ func main() {
 
 	client := pb.NewFileServiceClient(conn)
 
-	uploadFile(client, "./files/ruru.bmp")
-	downloadFile(client, "ruru.bmp")
+	uploadFile(client, "./files/testImg.png")
+	downloadFile(client, "testImg.png")
 
 	listFiles(client)
 }
