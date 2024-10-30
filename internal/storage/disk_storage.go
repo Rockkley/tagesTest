@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"tagesTest/internal/domain"
+	"time"
 )
 
 type DiskStorage struct {
@@ -42,15 +44,21 @@ func (s *DiskStorage) List() ([]domain.File, error) {
 			return err
 		}
 		if !info.IsDir() {
+			creationTime := getCreationTime(info)
 			files = append(files, domain.File{
 				Filename:  info.Name(),
-				CreatedAt: info.ModTime(),
+				CreatedAt: creationTime,
 				UpdatedAt: info.ModTime(),
 			})
 		}
 		return nil
 	})
 	return files, err
+}
+
+func getCreationTime(info os.FileInfo) time.Time {
+	stat := info.Sys().(*syscall.Win32FileAttributeData)
+	return time.Unix(0, stat.CreationTime.Nanoseconds())
 }
 
 func (s *DiskStorage) Get(filename string) (io.ReadCloser, error) {
