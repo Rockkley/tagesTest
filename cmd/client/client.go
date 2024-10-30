@@ -28,7 +28,6 @@ func main() {
 
 	uploadFile(client, "./files/testImg.png")
 	downloadFile(client, "testImg.png")
-
 	listFiles(client)
 }
 

@@ -170,25 +170,40 @@ func (h *FileServiceHandler) DownloadFile(req *pb.DownloadFileRequest, stream pb
 		return status.Errorf(codes.ResourceExhausted, "download limit reached")
 	}
 	defer h.downloadLimiter.Release()
+
 	if !isImage(req.Filename) {
 		return status.Errorf(codes.InvalidArgument, "not an image")
 	}
-	filePath := filepath.Join(h.storageDir, req.Filename)
-	file, err := h.service.DownloadFile(filePath)
+
+	sourcePath := filepath.Join(h.storageDir, req.Filename)
+	sourceFile, err := h.service.DownloadFile(sourcePath)
 	if err != nil {
 		return status.Errorf(codes.NotFound, "file not found: %v", err)
 	}
-	defer file.Close()
+	defer sourceFile.Close()
+
+	destPath := filepath.Join("downloads", "downloaded_"+req.Filename)
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return status.Errorf(codes.Internal, "failed to create destination file: %v", err)
+	}
+	defer destFile.Close()
 
 	buffer := make([]byte, 1024)
 	for {
-		n, err := file.Read(buffer)
+		n, err := sourceFile.Read(buffer)
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return status.Errorf(codes.Internal, "failed to read file: %v", err)
 		}
+
+		_, err = destFile.Write(buffer[:n])
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed to write to destination file: %v", err)
+		}
+
 		if err := stream.Send(&pb.DownloadFileResponse{Chunk: buffer[:n]}); err != nil {
 			return status.Errorf(codes.Internal, "failed to send chunk: %v", err)
 		}
