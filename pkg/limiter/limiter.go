@@ -2,6 +2,7 @@ package limiter
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
 
@@ -12,6 +13,9 @@ type Limiter struct {
 }
 
 func NewLimiter(limit int) *Limiter {
+	if limit <= 0 {
+		limit = 1
+	}
 	return &Limiter{limit: limit}
 }
 
@@ -25,7 +29,12 @@ func (l *Limiter) Acquire(ctx context.Context) error {
 			return ctx.Err()
 		default:
 			l.mu.Unlock()
-			l.mu.Lock()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				l.mu.Lock()
+			}
 		}
 	}
 
@@ -33,8 +42,12 @@ func (l *Limiter) Acquire(ctx context.Context) error {
 	return nil
 }
 
-func (l *Limiter) Release() {
+func (l *Limiter) Release() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.count <= 0 {
+		return errors.New("release called more times than acquire")
+	}
 	l.count--
+	return nil
 }
