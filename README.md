@@ -1,4 +1,5 @@
 Запустить сервер - go run cmd/server/main.go
+
 Запустить клиент - go run cmd/client/client.go
 
 Методы клиента:
